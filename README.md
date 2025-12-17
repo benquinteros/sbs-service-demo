@@ -80,8 +80,47 @@ helm uninstall sbs-demo -n sbs-demo
 - **Helm 3** - Package management and templating
 
 **Traffic Flow:**
-```
-HTTP Request → Istio Gateway → VirtualService (header matching) → DestinationRule (subset selection) → Service → Pod
+
+```mermaid
+graph LR
+    Client[HTTP Client]
+    Gateway[Istio Gateway<br/>Port 80]
+    VS[VirtualService<br/>Header Routing]
+
+    MainSvc[branch-api-main<br/>Service]
+    FeatureSvc[branch-api-feature<br/>Service]
+    DevSvc[branch-api-dev<br/>Service]
+
+    MainPod1[Main Pod v1<br/>+ Envoy Sidecar]
+    MainPod2[Main Pod v1<br/>+ Envoy Sidecar]
+    FeaturePod1[Feature Pod v2<br/>+ Envoy Sidecar]
+    FeaturePod2[Feature Pod v2<br/>+ Envoy Sidecar]
+    DevPod[Dev Pod v3<br/>+ Envoy Sidecar]
+
+    Client -->|localhost:80| Gateway
+    Gateway --> VS
+
+    VS -->|no header or<br/>x-branch:main| MainSvc
+    VS -->|x-branch:feature| FeatureSvc
+    VS -->|x-branch:dev| DevSvc
+
+    MainSvc --> MainPod1
+    MainSvc --> MainPod2
+    FeatureSvc --> FeaturePod1
+    FeatureSvc --> FeaturePod2
+    DevSvc --> DevPod
+
+    style Client fill:#0d47a1,stroke:#1976d2,stroke-width:2px,color:#fff
+    style Gateway fill:#e65100,stroke:#ff6f00,stroke-width:2px,color:#fff
+    style VS fill:#e65100,stroke:#ff6f00,stroke-width:2px,color:#fff
+    style MainSvc fill:#1b5e20,stroke:#43a047,stroke-width:2px,color:#fff
+    style FeatureSvc fill:#e65100,stroke:#ff9800,stroke-width:2px,color:#fff
+    style DevSvc fill:#880e4f,stroke:#c2185b,stroke-width:2px,color:#fff
+    style MainPod1 fill:#2e7d32,stroke:#66bb6a,stroke-width:2px,color:#fff
+    style MainPod2 fill:#2e7d32,stroke:#66bb6a,stroke-width:2px,color:#fff
+    style FeaturePod1 fill:#ef6c00,stroke:#ffa726,stroke-width:2px,color:#fff
+    style FeaturePod2 fill:#ef6c00,stroke:#ffa726,stroke-width:2px,color:#fff
+    style DevPod fill:#ad1457,stroke:#ec407a,stroke-width:2px,color:#fff
 ```
 
 **Istio Resources:**
