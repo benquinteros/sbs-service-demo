@@ -1,0 +1,72 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: branch-api-feature
+  namespace: sbs-demo
+  labels:
+    app: branch-api
+    branch: feature
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: branch-api
+      branch: feature
+  template:
+    metadata:
+      labels:
+        app: branch-api
+        branch: feature
+    spec:
+      containers:
+        - name: branch-api
+          image: branch-api:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8080
+              name: http
+          env:
+            - name: BRANCH_NAME
+              value: "feature"
+            - name: VERSION
+              value: "2.0.0-beta"
+            - name: ASPNETCORE_ENVIRONMENT
+              value: "Development"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "256Mi"
+              cpu: "500m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: branch-api-feature
+  namespace: sbs-demo
+  labels:
+    app: branch-api
+    branch: feature
+spec:
+  selector:
+    app: branch-api
+    branch: feature
+  ports:
+    - port: 80
+      targetPort: 8080
+      protocol: TCP
+      name: http
+  type: ClusterIP

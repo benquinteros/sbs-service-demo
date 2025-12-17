@@ -1,0 +1,68 @@
+# Main ingress - handles default traffic (no x-branch header)
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: branch-api-main-ingress
+  namespace: sbs-demo
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+spec:
+  ingressClassName: nginx
+  rules:
+    - http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: branch-api-main
+                port:
+                  number: 80
+---
+# Feature canary - routes traffic with x-branch: feature header
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: branch-api-feature-ingress
+  namespace: sbs-demo
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+    nginx.ingress.kubernetes.io/canary: "true"
+    nginx.ingress.kubernetes.io/canary-by-header: "x-branch"
+    nginx.ingress.kubernetes.io/canary-by-header-value: "feature"
+spec:
+  ingressClassName: nginx
+  rules:
+    - http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: branch-api-feature
+                port:
+                  number: 80
+---
+# Dev canary - routes traffic with x-branch: dev header
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: branch-api-dev-ingress
+  namespace: sbs-demo
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+    nginx.ingress.kubernetes.io/canary: "true"
+    nginx.ingress.kubernetes.io/canary-by-header: "x-branch"
+    nginx.ingress.kubernetes.io/canary-by-header-value: "dev"
+spec:
+  ingressClassName: nginx
+  rules:
+    - http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: branch-api-dev
+                port:
+                  number: 80
