@@ -1,0 +1,13 @@
+apiVersion: v2
+name: sbs-demo
+description: Side-by-side deployment demo with header-based routing
+type: application
+version: 1.0.0
+appVersion: "1.0.0"
+keywords:
+  - kubernetes
+  - canary
+  - side-by-side
+  - header-routing
+maintainers:
+  - name: Ben

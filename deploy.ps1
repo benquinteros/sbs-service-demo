@@ -31,15 +31,42 @@ if (-not (Get-Command kubectl -ErrorAction SilentlyContinue)) {
     exit 1
 }
 
-# Delete existing cluster if present
-$clusters = kind get clusters 2>$null
-if ($clusters -contains "sbs-demo") {
-    Write-Host "Deleting existing cluster..." -ForegroundColor Yellow
-    kind delete cluster --name sbs-demo
+# Install helm if needed
+Write-Host "Checking helm..." -ForegroundColor Yellow
+if (-not (Get-Command helm -ErrorAction SilentlyContinue)) {
+    Write-Host "Installing helm..." -ForegroundColor Green
+    Invoke-WebRequest -Uri "https://get.helm.sh/helm-v3.13.0-windows-amd64.zip" -OutFile "$env:TEMP\helm.zip"
+    Expand-Archive -Path "$env:TEMP\helm.zip" -DestinationPath "$env:TEMP\helm" -Force
+    $helmDir = "$env:USERPROFILE\bin"
+    if (-not (Test-Path $helmDir)) { New-Item -ItemType Directory -Path $helmDir | Out-Null }
+    Copy-Item "$env:TEMP\helm\windows-amd64\helm.exe" -Destination "$helmDir\helm.exe" -Force
+    Remove-Item "$env:TEMP\helm.zip" -Force
+    Remove-Item "$env:TEMP\helm" -Recurse -Force
+    $env:Path = "$helmDir;$env:Path"
+}
+
+# Check if cluster exists
+$clusterExists = $false
+try {
+    $clusters = kind get clusters 2>&1
+    if ($LASTEXITCODE -eq 0 -and $clusters -contains "sbs-demo") {
+        $clusterExists = $true
+        Write-Host "Found existing cluster 'sbs-demo'. Deleting..." -ForegroundColor Yellow
+        kind delete cluster --name sbs-demo
+    }
+}
+catch {
+    # No clusters exist, continue
 }
 
 # Create cluster with port mappings
-Write-Host "`nCreating Kubernetes cluster..." -ForegroundColor Green
+if (-not $clusterExists) {
+    Write-Host "`nCreating Kubernetes cluster..." -ForegroundColor Green
+}
+else {
+    Write-Host "`nRecreating Kubernetes cluster..." -ForegroundColor Green
+}
+
 $kindConfig = @"
 kind: Cluster
 apiVersion: kind.x-k8s.io/v1alpha4
@@ -67,63 +94,83 @@ docker build -t branch-api:latest . -q
 Write-Host "Loading image into cluster..." -ForegroundColor Green
 kind load docker-image branch-api:latest --name sbs-demo
 
-# Install NGINX Ingress
-Write-Host "`nInstalling NGINX Ingress..." -ForegroundColor Green
-kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/main/deploy/static/provider/kind/deploy.yaml | Out-Null
+# Install Istio
+Write-Host "`nInstalling Istio..." -ForegroundColor Green
+$istioVersion = "1.20.0"
+$istioDir = "$env:TEMP\istio-$istioVersion"
 
-Write-Host "Waiting for ingress controller (this takes ~30 seconds)..." -ForegroundColor Yellow
-Start-Sleep -Seconds 15
-
-# Wait for deployment to exist first
-$retries = 0
-while ($retries -lt 12) {
-    $deployment = kubectl get deployment -n ingress-nginx ingress-nginx-controller 2>$null
-    if ($deployment) { break }
-    Start-Sleep -Seconds 5
-    $retries++
+if (-not (Test-Path "$istioDir\bin\istioctl.exe")) {
+    Write-Host "Downloading Istio $istioVersion..." -ForegroundColor Yellow
+    Invoke-WebRequest -Uri "https://github.com/istio/istio/releases/download/$istioVersion/istio-$istioVersion-win.zip" -OutFile "$env:TEMP\istio.zip"
+    Expand-Archive -Path "$env:TEMP\istio.zip" -DestinationPath "$env:TEMP" -Force
+    Remove-Item "$env:TEMP\istio.zip" -Force
 }
 
-# Now wait for pods to be ready
-kubectl wait --namespace ingress-nginx --for=condition=ready pod --selector=app.kubernetes.io/component=controller --timeout=90s 2>$null | Out-Null
+$istioctl = "$istioDir\bin\istioctl.exe"
 
-# Wait a bit more for webhook to be fully ready
+Write-Host "Installing Istio control plane (this takes ~60 seconds)..." -ForegroundColor Yellow
+& $istioctl install --set profile=demo --set values.gateways.istio-ingressgateway.type=NodePort -y | Out-Null
+
+Write-Host "Waiting for Istio components..." -ForegroundColor Yellow
+kubectl wait --namespace istio-system --for=condition=ready pod --selector=app=istiod --timeout=180s 2>$null | Out-Null
+kubectl wait --namespace istio-system --for=condition=ready pod --selector=app=istio-ingressgateway --timeout=180s 2>$null | Out-Null
+
+# Patch ingress gateway to use host ports for kind
+Write-Host "Configuring ingress gateway for kind..." -ForegroundColor Yellow
+$patchFile = Join-Path $env:TEMP "istio-patch-$(Get-Random).json"
+'[{"op":"add","path":"/spec/template/spec/containers/0/ports/-","value":{"containerPort":8080,"hostPort":80,"name":"http-host","protocol":"TCP"}}]' | Out-File -FilePath $patchFile -Encoding utf8 -NoNewline
+kubectl patch deployment istio-ingressgateway -n istio-system --type=json --patch-file $patchFile 2>$null | Out-Null
+Remove-Item $patchFile -Force -ErrorAction SilentlyContinue
+kubectl rollout status deployment/istio-ingressgateway -n istio-system --timeout=120s 2>$null | Out-Null
+
 Start-Sleep -Seconds 10
 
-# Deploy application
-Write-Host "`nDeploying application..." -ForegroundColor Green
-kubectl apply -f k8s/namespace.yaml | Out-Null
-kubectl apply -f k8s/deployment-main.yaml | Out-Null
-kubectl apply -f k8s/deployment-feature.yaml | Out-Null
-kubectl apply -f k8s/deployment-dev.yaml | Out-Null
+# Deploy application with Helm
+Write-Host "`nDeploying application with Helm..." -ForegroundColor Green
+helm upgrade --install sbs-demo ./charts/sbs-demo --create-namespace --wait --timeout=3m | Out-Null
 
 Write-Host "Waiting for pods..." -ForegroundColor Yellow
 kubectl wait --namespace sbs-demo --for=condition=ready pod --selector=app=branch-api --timeout=120s | Out-Null
 
-# Deploy ingress (retry if webhook not ready)
-Write-Host "Deploying ingress..." -ForegroundColor Yellow
-$retries = 0
-while ($retries -lt 5) {
-    $result = kubectl apply -f k8s/ingress.yaml 2>&1
-    if ($LASTEXITCODE -eq 0) { break }
-    Start-Sleep -Seconds 5
-    $retries++
-}
-
 # Test routing
 Write-Host "`n=== Testing Header-Based Routing ===" -ForegroundColor Cyan
-Start-Sleep -Seconds 3
+Start-Sleep -Seconds 5
 
 Write-Host "`n1. Default (no header) -> main branch:" -ForegroundColor Yellow
-$result = Invoke-RestMethod http://localhost/api/info
-Write-Host "   Branch: $($result.branch) | Version: $($result.version)" -ForegroundColor Green
+try {
+    $result = Invoke-RestMethod http://localhost/api/info
+    Write-Host "   Branch: $($result.branch) | Version: $($result.version)" -ForegroundColor Green
+}
+catch {
+    Write-Host "   Failed: $_" -ForegroundColor Red
+}
 
 Write-Host "`n2. With x-branch: feature -> feature branch:" -ForegroundColor Yellow
-$result = Invoke-RestMethod http://localhost/api/info -Headers @{"x-branch" = "feature" }
-Write-Host "   Branch: $($result.branch) | Version: $($result.version)" -ForegroundColor Green
+try {
+    $result = Invoke-RestMethod http://localhost/api/info -Headers @{"x-branch" = "feature" }
+    Write-Host "   Branch: $($result.branch) | Version: $($result.version)" -ForegroundColor Green
+}
+catch {
+    Write-Host "   Failed: $_" -ForegroundColor Red
+}
 
-Write-Host "`n3. With x-branch: main -> main branch:" -ForegroundColor Yellow
-$result = Invoke-RestMethod http://localhost/api/info -Headers @{"x-branch" = "main" }
-Write-Host "   Branch: $($result.branch) | Version: $($result.version)" -ForegroundColor Green
+Write-Host "`n3. With x-branch: dev -> dev branch:" -ForegroundColor Yellow
+try {
+    $result = Invoke-RestMethod http://localhost/api/info -Headers @{"x-branch" = "dev" }
+    Write-Host "   Branch: $($result.branch) | Version: $($result.version)" -ForegroundColor Green
+}
+catch {
+    Write-Host "   Failed: $_" -ForegroundColor Red
+}
+
+Write-Host "`n4. With x-branch: main -> main branch:" -ForegroundColor Yellow
+try {
+    $result = Invoke-RestMethod http://localhost/api/info -Headers @{"x-branch" = "main" }
+    Write-Host "   Branch: $($result.branch) | Version: $($result.version)" -ForegroundColor Green
+}
+catch {
+    Write-Host "   Failed: $_" -ForegroundColor Red
+}
 
 # Show cluster status
 Write-Host "`n=== Cluster Status ===" -ForegroundColor Cyan
@@ -132,4 +179,5 @@ kubectl get pods -n sbs-demo
 Write-Host "`n=== SUCCESS! ===" -ForegroundColor Green
 Write-Host "Test the API:  Invoke-RestMethod http://localhost/api/info -Headers @{`"x-branch`"=`"feature`"}" -ForegroundColor Gray
 Write-Host "View logs:     kubectl logs -n sbs-demo -l branch=main" -ForegroundColor Gray
-Write-Host "Cleanup:       kind delete cluster --name sbs-demo" -ForegroundColor Gray
+Write-Host "Kiali dash:    kubectl port-forward -n istio-system svc/kiali 20001:20001" -ForegroundColor Gray
+Write-Host "Cleanup:       .\cleanup.ps1" -ForegroundColor Gray

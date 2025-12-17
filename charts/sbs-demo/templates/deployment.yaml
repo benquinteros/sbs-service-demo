@@ -1,0 +1,54 @@
+{{- range $branch, $config := .Values.branches }}
+{{- if $config.enabled }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: branch-api-{{ $branch }}
+  namespace: {{ $.Values.namespace }}
+  labels:
+    app: branch-api
+    branch: {{ $branch }}
+spec:
+  replicas: {{ $config.replicas }}
+  selector:
+    matchLabels:
+      app: branch-api
+      branch: {{ $branch }}
+  template:
+    metadata:
+      labels:
+        app: branch-api
+        branch: {{ $branch }}
+        version: {{ $config.version }}
+    spec:
+      containers:
+        - name: branch-api
+          image: "{{ $.Values.image.repository }}:{{ $.Values.image.tag }}"
+          imagePullPolicy: {{ $.Values.image.pullPolicy }}
+          ports:
+            - containerPort: {{ $.Values.service.targetPort }}
+              name: http
+          env:
+            - name: BRANCH_NAME
+              value: {{ $config.env.branchName | quote }}
+            - name: VERSION
+              value: {{ $config.env.version | quote }}
+            - name: ASPNETCORE_ENVIRONMENT
+              value: {{ $config.env.aspnetcoreEnvironment | quote }}
+          livenessProbe:
+            httpGet:
+              path: {{ $.Values.probes.liveness.path }}
+              port: {{ $.Values.service.targetPort }}
+            initialDelaySeconds: {{ $.Values.probes.liveness.initialDelaySeconds }}
+            periodSeconds: {{ $.Values.probes.liveness.periodSeconds }}
+          readinessProbe:
+            httpGet:
+              path: {{ $.Values.probes.readiness.path }}
+              port: {{ $.Values.service.targetPort }}
+            initialDelaySeconds: {{ $.Values.probes.readiness.initialDelaySeconds }}
+            periodSeconds: {{ $.Values.probes.readiness.periodSeconds }}
+          resources:
+            {{- toYaml $config.resources | nindent 12 }}
+{{- end }}
+{{- end }}

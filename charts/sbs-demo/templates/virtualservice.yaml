@@ -1,0 +1,35 @@
+{{- if .Values.istio.enabled }}
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: branch-api-routes
+  namespace: {{ .Values.namespace }}
+spec:
+  hosts:
+    - "*"
+  gateways:
+    - istio-system/{{ .Values.istio.gateway.name }}
+  http:
+    {{- range $branch, $config := .Values.branches }}
+    {{- if and $config.enabled $config.headerValue }}
+    # Route for {{ $branch }} branch with header {{ $.Values.istio.routing.header }}={{ $config.headerValue }}
+    - match:
+        - headers:
+            {{ $.Values.istio.routing.header }}:
+              exact: {{ $config.headerValue }}
+      route:
+        - destination:
+            host: branch-api-{{ $branch }}.{{ $.Values.namespace }}.svc.cluster.local
+            port:
+              number: {{ $.Values.service.port }}
+            subset: {{ $config.version }}
+    {{- end }}
+    {{- end }}
+    # Default route (no header or no match)
+    - route:
+        - destination:
+            host: branch-api-{{ .Values.istio.routing.defaultBranch }}.{{ .Values.namespace }}.svc.cluster.local
+            port:
+              number: {{ .Values.service.port }}
+            subset: {{ (index .Values.branches .Values.istio.routing.defaultBranch).version }}
+{{- end }}

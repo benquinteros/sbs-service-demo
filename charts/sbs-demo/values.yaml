@@ -1,0 +1,81 @@
+namespace: sbs-demo
+
+image:
+  repository: branch-api
+  tag: latest
+  pullPolicy: IfNotPresent
+
+istio:
+  enabled: true
+  gateway:
+    name: sbs-gateway
+    port: 80
+  routing:
+    header: x-branch
+    defaultBranch: main
+
+branches:
+  main:
+    enabled: true
+    replicas: 2
+    version: v1
+    env:
+      branchName: main
+      version: "1.0.0"
+      aspnetcoreEnvironment: Production
+    resources:
+      requests:
+        memory: "128Mi"
+        cpu: "100m"
+      limits:
+        memory: "256Mi"
+        cpu: "500m"
+
+  feature:
+    enabled: true
+    replicas: 2
+    version: v2
+    headerValue: feature
+    env:
+      branchName: feature
+      version: "2.0.0-beta"
+      aspnetcoreEnvironment: Staging
+    resources:
+      requests:
+        memory: "128Mi"
+        cpu: "100m"
+      limits:
+        memory: "256Mi"
+        cpu: "500m"
+
+  dev:
+    enabled: true
+    replicas: 1
+    version: v3
+    headerValue: dev
+    env:
+      branchName: dev
+      version: "3.0.0-alpha"
+      aspnetcoreEnvironment: Development
+    resources:
+      requests:
+        memory: "128Mi"
+        cpu: "100m"
+      limits:
+        memory: "256Mi"
+        cpu: "500m"
+
+service:
+  type: ClusterIP
+  port: 80
+  targetPort: 8080
+
+probes:
+  liveness:
+    path: /health
+    initialDelaySeconds: 10
+    periodSeconds: 10
+  readiness:
+    path: /health
+    initialDelaySeconds: 5
+    periodSeconds: 5

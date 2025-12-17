@@ -1,0 +1,23 @@
+{{- range $branch, $config := .Values.branches }}
+{{- if $config.enabled }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: branch-api-{{ $branch }}
+  namespace: {{ $.Values.namespace }}
+  labels:
+    app: branch-api
+    branch: {{ $branch }}
+spec:
+  selector:
+    app: branch-api
+    branch: {{ $branch }}
+  ports:
+    - port: {{ $.Values.service.port }}
+      targetPort: {{ $.Values.service.targetPort }}
+      protocol: TCP
+      name: http
+  type: {{ $.Values.service.type }}
+{{- end }}
+{{- end }}

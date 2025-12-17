@@ -1,0 +1,20 @@
+{{- if .Values.istio.enabled }}
+{{- range $branch, $config := .Values.branches }}
+{{- if $config.enabled }}
+---
+apiVersion: networking.istio.io/v1beta1
+kind: DestinationRule
+metadata:
+  name: branch-api-{{ $branch }}-dr
+  namespace: {{ $.Values.namespace }}
+spec:
+  host: branch-api-{{ $branch }}.{{ $.Values.namespace }}.svc.cluster.local
+  subsets:
+    - name: {{ $config.version }}
+      labels:
+        app: branch-api
+        branch: {{ $branch }}
+        version: {{ $config.version }}
+{{- end }}
+{{- end }}
+{{- end }}
